@@ -56,6 +56,7 @@ document.addEventListener('DOMContentLoaded', () => {
     settingsModal: document.getElementById('settings-modal'),
     closeSettingsBtn: document.getElementById('close-settings-btn'),
     saveSettingsBtn: document.getElementById('save-settings-btn'),
+    envStatusBanner: document.getElementById('env-status-banner'),
     inputWebAppUrl: document.getElementById('input-webapp-url'),
     showScriptCodeBtn: document.getElementById('show-script-code-btn'),
     inputClientId: document.getElementById('input-client-id'),
@@ -345,12 +346,18 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     });
 
-    // Manual Sync Button
-    el.syncNowBtn.addEventListener('click', () => {
-      if (!window.googleAuth.isAuthenticated()) {
-        window.googleAuth.requestLogin();
+    // Manual Save to Drive & Sheets Button
+    el.syncNowBtn.addEventListener('click', async () => {
+      const isServerSync = Boolean(window.envConfig && window.envConfig.config && window.envConfig.config.serverSyncAvailable);
+      const isWebApp = Boolean(window.googleSheets && window.googleSheets.webAppUrl);
+      const isOAuth = Boolean(window.googleAuth && window.googleAuth.isAuthenticated());
+
+      if (!isServerSync && !isWebApp && !isOAuth) {
+        openSettingsModal();
+        showToast('Please configure Google Apps Script Webhook or Google Sign In to save to Drive!', 'info');
       } else {
-        window.syncEngine.performSync(false);
+        showToast('Saving progress to Google Sheets & Google Drive...', 'info');
+        await window.syncEngine.performSync(false);
       }
     });
 
@@ -512,9 +519,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Settings Modal Functions
   function openSettingsModal() {
-    el.inputWebAppUrl.value = window.googleSheets.webAppUrl || '';
-    el.inputClientId.value = window.googleAuth.config.clientId || '';
-    el.inputSheetId.value = window.googleAuth.config.spreadsheetId || window.googleSheets.getSpreadsheetId();
+    const isServerConfigured = Boolean(window.envConfig && window.envConfig.config && window.envConfig.config.serverSyncAvailable);
+    if (el.envStatusBanner) {
+      el.envStatusBanner.style.display = isServerConfigured ? 'block' : 'none';
+    }
+
+    el.inputWebAppUrl.value = window.googleSheets.webAppUrl ? '••••••••••••••••' : '';
+    el.inputClientId.value = window.googleAuth.config.clientId ? '••••••••••••••••' : '';
+    el.inputSheetId.value = (window.envConfig && window.envConfig.config.spreadsheetId) || window.googleAuth.config.spreadsheetId || window.googleSheets.getSpreadsheetId();
     el.settingsModal.classList.add('open');
   }
 
@@ -523,19 +535,26 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function saveSettings() {
-    const webAppUrl = el.inputWebAppUrl.value;
-    const clientId = el.inputClientId.value;
-    const sheetId = el.inputSheetId.value;
+    const webAppUrl = el.inputWebAppUrl.value.trim();
+    const clientId = el.inputClientId.value.trim();
+    const sheetId = el.inputSheetId.value.trim();
 
-    window.googleSheets.setWebAppUrl(webAppUrl);
-    window.googleAuth.saveConfig(clientId, '', sheetId);
+    if (webAppUrl && !webAppUrl.includes('•')) {
+      window.googleSheets.setWebAppUrl(webAppUrl);
+    }
+    if (clientId && !clientId.includes('•')) {
+      window.googleAuth.saveConfig(clientId, '', sheetId);
+    } else if (sheetId) {
+      window.googleAuth.saveConfig(window.googleAuth.config.clientId, '', sheetId);
+    }
+
     closeSettingsModal();
 
-    if (webAppUrl) {
+    if (webAppUrl || (window.envConfig && window.envConfig.config.serverSyncAvailable)) {
       el.syncPill.className = 'sync-pill';
       el.syncStatusText.textContent = 'Connected (Direct)';
       window.syncEngine.performSync(false);
-      showToast('Connected to Google Sheet via Direct Webhook!', 'success');
+      showToast('Connected to Google Sheet!', 'success');
     } else {
       showToast('Settings saved successfully!', 'success');
     }
@@ -573,13 +592,24 @@ document.addEventListener('DOMContentLoaded', () => {
       stateSheet.getRange(1, 1, 1, data.stateRows[0].length).setFontWeight("bold").setBackground("#fef3c7");
     }
 
-    return ContentService.createTextOutput(JSON.stringify({ status: "success" })).setMimeType(ContentService.MimeType.JSON);
+    // 4. Save JSON Database to Google Drive
+    var filename = "gate_aptitude_monitor_backup.json";
+    var files = DriveApp.getFilesByName(filename);
+    var fullJson = JSON.stringify(data.state || data, null, 2);
+    if (files.hasNext()) {
+      var file = files.next();
+      file.setContent(fullJson);
+    } else {
+      DriveApp.createFile(filename, fullJson, MimeType.PLAIN_TEXT);
+    }
+
+    return ContentService.createTextOutput(JSON.stringify({ status: "success", driveSaved: true })).setMimeType(ContentService.MimeType.JSON);
   } catch (err) {
     return ContentService.createTextOutput(JSON.stringify({ status: "error", message: err.toString() })).setMimeType(ContentService.MimeType.JSON);
   }
 }`;
       navigator.clipboard.writeText(scriptCode).then(() => {
-        showToast('Apps Script code copied to clipboard! (In Sheets: Extensions > Apps Script > Paste > Deploy)', 'celebrate');
+        showToast('Apps Script code (with Drive save) copied to clipboard!', 'celebrate');
       }).catch(() => {
         prompt('Copy this code into Extensions > Apps Script in your Google Sheet:', scriptCode);
       });

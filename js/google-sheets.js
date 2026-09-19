@@ -78,7 +78,7 @@ class GoogleSheetsManager {
       ['Last System Sync', timestamp, timestamp]
     ];
 
-    return { dailyRows, videoRows, stateRows, timestamp };
+    return { dailyRows, videoRows, stateRows, timestamp, state };
   }
 
   // Ensure sheets and headers exist (OAuth mode)
@@ -110,27 +110,44 @@ class GoogleSheetsManager {
     }
   }
 
-  // Write full sync data to Google Sheets (Supports both WebApp direct sync & OAuth)
+  // Write full sync data to Google Sheets (Supports both Serverless Proxy, WebApp direct sync & OAuth)
   async syncToGoogleSheet(state) {
     const payload = this.prepareSyncPayload(state);
 
-    // Method 1: If Google Apps Script Web App URL is provided, sync directly without OAuth keys!
+    // Method 1: Secure Serverless Backend Proxy (/api/sync) - Zero keys exposed to browser
+    if (window.envConfig && window.envConfig.config && window.envConfig.config.serverSyncAvailable) {
+      try {
+        const response = await fetch('/api/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (response.ok) {
+          console.log('Google Sheets synced securely via Vercel backend /api/sync at', payload.timestamp);
+          return { success: true, timestamp: payload.timestamp, mode: 'serverless' };
+        }
+      } catch (err) {
+        console.warn('Vercel backend sync warning:', err);
+      }
+    }
+
+    // Method 2: If manual Web App URL was entered locally
     if (this.webAppUrl) {
       try {
         const response = await fetch(this.webAppUrl, {
           method: 'POST',
-          mode: 'no-cors', // Apps script redirect compatibility
+          mode: 'no-cors',
           headers: { 'Content-Type': 'text/plain' },
           body: JSON.stringify(payload)
         });
-        console.log('Google Sheets synced directly via Apps Script Webhook at', payload.timestamp);
+        console.log('Google Sheets synced via manual webhook at', payload.timestamp);
         return { success: true, timestamp: payload.timestamp, mode: 'webhook' };
       } catch (err) {
-        console.warn('Apps script webhook error:', err);
+        console.warn('Manual webhook error:', err);
       }
     }
 
-    // Method 2: Via Google OAuth 2.0 (GAPI)
+    // Method 3: Via Google OAuth 2.0 (GAPI)
     if (window.googleAuth && window.googleAuth.isAuthenticated()) {
       const spreadsheetId = this.getSpreadsheetId();
       try {
@@ -167,7 +184,7 @@ class GoogleSheetsManager {
       }
     }
 
-    return { success: false, error: 'Not authenticated with Google OAuth and no Web App URL set' };
+    return { success: false, error: 'No sync method available' };
   }
 
   // Restore progress from Google Sheets on initial load

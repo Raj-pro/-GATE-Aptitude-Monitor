@@ -102,10 +102,11 @@ class BackgroundSyncEngine {
   async performSync(silent = false) {
     if (this.isSyncing) return;
 
+    const hasServerSync = Boolean(window.envConfig && window.envConfig.config && window.envConfig.config.serverSyncAvailable);
     const hasWebAppUrl = Boolean(window.googleSheets && window.googleSheets.webAppUrl);
     const hasOAuth = Boolean(window.googleAuth && window.googleAuth.isAuthenticated());
 
-    if (!hasWebAppUrl && !hasOAuth) {
+    if (!hasServerSync && !hasWebAppUrl && !hasOAuth) {
       this.setSyncStatus('offline');
       this.notify('sync_skipped', { reason: 'not_authenticated' });
       return;

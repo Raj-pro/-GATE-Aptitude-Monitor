@@ -15,7 +15,7 @@ export default function handler(req, res) {
 
   const config = {
     spreadsheetId: process.env.GOOGLE_SPREADSHEET_ID || '1SrajvQUpS_fp5DkTEmHIgHbHI7lw9VBm1SP4QKfk5MY',
-    webAppUrl: process.env.GOOGLE_WEBAPP_URL || '',
+    serverSyncAvailable: Boolean(process.env.GOOGLE_WEBAPP_URL),
     clientId: process.env.GOOGLE_CLIENT_ID || '',
     playlistId: process.env.YOUTUBE_PLAYLIST_ID || 'PLC36xJgs4dxE43Au1FGRQvwHTr7NbgDCS'
   };

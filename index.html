@@ -37,13 +37,13 @@
       </div>
 
       <div class="header-actions">
-        <!-- 5-Min Silent Auto-Sync Pill -->
+        <!-- 5-Min Silent Auto-Sync Pill & Manual Trigger -->
         <div id="sync-pill" class="sync-pill offline">
           <span class="sync-status-dot"></span>
           <span id="sync-status-text">Local (Offline)</span>
           <span id="sync-timer-badge" class="sync-timer-badge">05:00</span>
-          <button id="sync-now-btn" class="sync-now-btn" title="Sync now to Google Sheets & Drive">
-            ☁️
+          <button id="sync-now-btn" class="sync-now-btn" title="Click to immediately Save to Google Drive & Google Sheets">
+            ☁️ Save to Drive & Sheets
           </button>
         </div>
 
@@ -249,32 +249,41 @@
         <button id="close-settings-btn" class="modal-close-btn">&times;</button>
       </div>
 
+      <div id="env-status-banner" style="display: none; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: var(--radius-md); padding: 12px 16px; margin-bottom: 18px;">
+        <div style="display: flex; align-items: center; gap: 8px; font-size: 0.86rem; font-weight: 700; color: #34d399;">
+          <span>🔒</span> Vercel Environment Variables Active
+        </div>
+        <p style="font-size: 0.76rem; color: var(--text-muted); margin-top: 4px;">
+          Your Google Sheet and OAuth configs are securely managed on the Vercel backend. Keys and Webhook URLs are never exposed in the browser.
+        </p>
+      </div>
+
       <div class="form-group" style="background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.3); border-radius: var(--radius-md); padding: 14px; margin-bottom: 18px;">
-        <label class="form-label" style="color: #a5b4fc; font-weight: 700;">⚡ Option 1: Direct Google Sheets Sync (No OAuth Keys Needed!)</label>
+        <label class="form-label" style="color: #a5b4fc; font-weight: 700;">⚡ Option 1: Direct Google Sheets Sync</label>
         <p class="form-help" style="margin-bottom: 10px; color: var(--text-main);">
-          Just paste your deployed <strong>Google Apps Script Web App URL</strong> below to sync directly with your Google Sheet every 5 minutes automatically without configuring Google Cloud Console credentials.
+          Google Apps Script Web App URL (Optional manual override):
         </p>
         <input 
-          type="text" 
+          type="password" 
           id="input-webapp-url" 
           class="form-input" 
-          placeholder="https://script.google.com/macros/s/AKfycb.../exec"
+          placeholder="••••••••••••••••••••••••••••••••"
         >
         <div style="margin-top: 8px;">
           <button type="button" id="show-script-code-btn" class="btn btn-outline" style="font-size: 0.76rem; padding: 4px 10px;">
-            📋 View 1-Minute Apps Script Code
+            📋 View Apps Script Code
           </button>
         </div>
       </div>
 
       <div class="form-group">
-        <label class="form-label">🔐 Option 2: Google OAuth 2.0 Sign In (Google Cloud)</label>
+        <label class="form-label">🔐 Option 2: Google OAuth 2.0 Sign In</label>
         <label class="form-label" for="input-client-id" style="font-size: 0.78rem; font-weight: normal;">Google OAuth Client ID</label>
         <input 
-          type="text" 
+          type="password" 
           id="input-client-id" 
           class="form-input" 
-          placeholder="e.g. 123456789-abcdef.apps.googleusercontent.com"
+          placeholder="••••••••••••••••••••••••••••••••"
         >
       </div>
 
