@@ -107,17 +107,26 @@ To allow the application to sync to your Google Sheets and Google Drive:
 
 ---
 
-## 🌐 Deploying to Vercel / Netlify / GitHub Pages
+## 🌐 Deploying to Vercel with Environment Variables
 
-### Deploy to Vercel
+### 1. Configure Vercel Project Environment Variables
+In your [Vercel Dashboard](https://vercel.com/) > **Project Settings > Environment Variables**, add:
+
+| Key | Example Value | Description |
+|---|---|---|
+| `GOOGLE_SPREADSHEET_ID` | `1SrajvQUpS_fp5DkTEmHIgHbHI7lw9VBm1SP4QKfk5MY` | Target Google Spreadsheet ID |
+| `GOOGLE_WEBAPP_URL` | `https://script.google.com/macros/s/.../exec` | Direct Apps Script Webhook (Zero OAuth Keys!) |
+| `GOOGLE_CLIENT_ID` | `123456789-xxx.apps.googleusercontent.com` | Google OAuth Client ID (If using Google Sign-In) |
+| `YOUTUBE_PLAYLIST_ID` | `PLC36xJgs4dxE43Au1FGRQvwHTr7NbgDCS` | Amit Khurana Playlist ID |
+
+### 2. Deploy using Vercel CLI or Git
 ```bash
+# Using Vercel CLI
 npx vercel
+
+# Or push to GitHub connected to Vercel
+git push origin main
 ```
 
-### Deploy to Netlify
-Drag and drop this project directory into [Netlify Drop](https://app.netlify.com/drop).
+When deployed, the frontend automatically fetches `/api/config` on startup, injecting your environment variables seamlessly!
 
-### Deploy to GitHub Pages
-1. Push this repository to GitHub.
-2. Go to **Settings > Pages > Branch: main / Root > Save**.
-3. Add your GitHub Pages URL to Google Cloud Console Authorized JavaScript origins.

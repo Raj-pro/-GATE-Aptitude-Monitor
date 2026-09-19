@@ -79,7 +79,11 @@ document.addEventListener('DOMContentLoaded', () => {
   let searchQuery = '';
 
   // 1. Initialize UI Elements & YouTube Player
-  function initApp() {
+  async function initApp() {
+    if (window.envConfig) {
+      await window.envConfig.loadConfig();
+    }
+
     populateDaySelector();
     renderActiveDayTarget();
     renderPlaylist();
