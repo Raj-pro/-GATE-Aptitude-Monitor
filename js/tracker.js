@@ -94,10 +94,35 @@ class LectureTracker {
       if (isComplete) completedDays++;
     }
 
+    // Determine active day
+    let activeDay = parsed.currentActiveDay;
+    if (!activeDay) {
+      for (let d = 1; d <= TOTAL_DAYS; d++) {
+        if (!mergedDays[d].completed) {
+          activeDay = d;
+          break;
+        }
+      }
+    }
+    if (!activeDay) activeDay = 1;
+
+    // Determine current video ID (first unseen of active day or first unseen overall)
+    let currentVideoId = parsed.currentVideoId;
+    if (!currentVideoId || !mergedVideos[currentVideoId] || (mergedVideos[currentVideoId].seen && seenCount < PLAYLIST_DATA.length)) {
+      const activeLecs = getLecturesForDay(activeDay);
+      const firstUnseenInDay = activeLecs.find(l => !mergedVideos[l.id]?.seen);
+      if (firstUnseenInDay) {
+        currentVideoId = firstUnseenInDay.id;
+      } else {
+        const anyUnseen = PLAYLIST_DATA.find(l => !mergedVideos[l.id]?.seen);
+        currentVideoId = anyUnseen ? anyUnseen.id : (PLAYLIST_DATA[0]?.id || 'vid_1');
+      }
+    }
+
     return {
       version: 1,
-      currentActiveDay: parsed.currentActiveDay || 1,
-      currentVideoId: parsed.currentVideoId || PLAYLIST_DATA[0]?.id || 'vid_1',
+      currentActiveDay: activeDay,
+      currentVideoId: currentVideoId,
       videos: mergedVideos,
       days: mergedDays,
       stats: {
@@ -107,7 +132,7 @@ class LectureTracker {
         lastActiveDate: parsed.stats?.lastActiveDate || new Date().toISOString().split('T')[0],
         completedDaysCount: completedDays
       },
-      lastSyncedAt: parsed.lastSyncedAt || null,
+      lastSyncedAt: parsed.lastSyncedAt || new Date().toISOString(),
       lastModifiedAt: parsed.lastModifiedAt || new Date().toISOString()
     };
   }
@@ -321,13 +346,68 @@ class LectureTracker {
     return JSON.stringify(this.state, null, 2);
   }
 
+  // Merge incoming cloud state with local state safely
+  mergeState(cloudState) {
+    if (!cloudState || typeof cloudState !== 'object') return false;
+
+    // Check if local has no progress
+    const localSeenCount = this.state.stats?.totalVideosSeen || 0;
+    const cloudVideos = cloudState.videos || {};
+    let cloudSeenCount = 0;
+    Object.values(cloudVideos).forEach(v => {
+      if (v.seen) cloudSeenCount++;
+    });
+
+    // If local has 0 progress or cloud has more progress, merge union of seen lectures
+    const mergedVideos = { ...this.state.videos };
+    Object.keys(cloudVideos).forEach(vidId => {
+      const localVid = mergedVideos[vidId] || {};
+      const cloudVid = cloudVideos[vidId] || {};
+
+      const isSeen = Boolean(localVid.seen || cloudVid.seen);
+      const maxTime = Math.max(localVid.currentTime || 0, cloudVid.currentTime || 0);
+      const maxPercent = isSeen ? 100 : Math.max(localVid.percent || 0, cloudVid.percent || 0);
+      
+      let latestDate = localVid.lastWatchedAt || cloudVid.lastWatchedAt || null;
+      if (localVid.lastWatchedAt && cloudVid.lastWatchedAt) {
+        latestDate = new Date(localVid.lastWatchedAt) > new Date(cloudVid.lastWatchedAt) ? localVid.lastWatchedAt : cloudVid.lastWatchedAt;
+      }
+
+      mergedVideos[vidId] = {
+        ...localVid,
+        ...cloudVid,
+        seen: isSeen,
+        percent: maxPercent,
+        currentTime: maxTime,
+        lastWatchedAt: latestDate
+      };
+    });
+
+    const candidateState = {
+      ...this.state,
+      ...cloudState,
+      videos: mergedVideos,
+      currentActiveDay: cloudState.currentActiveDay || this.state.currentActiveDay,
+      stats: {
+        ...this.state.stats,
+        streakDays: Math.max(this.state.stats?.streakDays || 1, cloudState.stats?.streakDays || 1)
+      }
+    };
+
+    this.state = this.normalizeState(candidateState);
+    this.state.lastSyncedAt = new Date().toISOString();
+    this.saveToStorage();
+    this.notify('state_imported', { source: 'cloud_merge', seenVideos: this.state.stats.totalVideosSeen });
+    return true;
+  }
+
   // Import JSON from Google Drive / Sheets backup
   importState(newState) {
     if (!newState || typeof newState !== 'object') return false;
     this.state = this.normalizeState(newState);
     this.state.lastSyncedAt = new Date().toISOString();
     this.saveToStorage();
-    this.notify('state_imported', { source: 'cloud' });
+    this.notify('state_imported', { source: 'cloud', seenVideos: this.state.stats.totalVideosSeen });
     return true;
   }
 

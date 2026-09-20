@@ -47,7 +47,10 @@
           <span id="sync-status-text">Local (Offline)</span>
           <span id="sync-timer-badge" class="sync-timer-badge">05:00</span>
           <button id="sync-now-btn" class="sync-now-btn" title="Click to immediately Save to Google Drive & Google Sheets">
-            ☁️ Save to Drive & Sheets
+            ☁️ Save
+          </button>
+          <button id="pull-now-btn" class="sync-now-btn" style="background: rgba(59, 130, 246, 0.18); border-color: rgba(96, 165, 250, 0.4); color: #93c5fd;" title="Pull and restore progress from Google Sheet">
+            📥 Pull Sheet
           </button>
         </div>
 
@@ -304,7 +307,10 @@
         </p>
       </div>
 
-      <div style="display: flex; gap: 10px; margin-top: 20px; justify-content: flex-end;">
+      <div style="display: flex; gap: 10px; margin-top: 20px; justify-content: flex-end; flex-wrap: wrap;">
+        <button type="button" id="pull-sheet-btn" class="btn btn-outline" style="color: #60a5fa; border-color: rgba(96, 165, 250, 0.4);">
+          📥 Pull from Google Sheet
+        </button>
         <button id="save-settings-btn" class="btn btn-primary">Save Settings</button>
       </div>
 

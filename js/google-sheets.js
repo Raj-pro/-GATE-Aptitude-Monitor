@@ -189,54 +189,182 @@ class GoogleSheetsManager {
 
   // Restore progress from Google Sheets on initial load
   async loadFromGoogleSheet() {
-    if (this.webAppUrl) {
+    const spreadsheetId = this.getSpreadsheetId();
+
+    // Tier 1: Secure Serverless Backend Proxy (/api/sync)
+    if (window.envConfig && window.envConfig.config && window.envConfig.config.serverSyncAvailable) {
       try {
-        const res = await fetch(this.webAppUrl);
+        const res = await fetch('/api/sync');
         if (res.ok) {
           const data = await res.json();
-          if (data && data.videoRows) {
-            return this.parseSheetData(data.videoRows, data.dailyRows);
+          if (data && data.state && typeof data.state === 'object') {
+            console.log('Progress loaded from /api/sync (state object)');
+            return data.state;
+          }
+          if (data && data.videoRows && data.videoRows.length > 0) {
+            const parsed = this.parseSheetData(data.videoRows, data.dailyRows, data.stateRows);
+            if (parsed) {
+              console.log('Progress loaded from /api/sync (parsed rows)');
+              return parsed;
+            }
           }
         }
       } catch (e) {
-        console.warn('Could not load from Web App URL:', e);
+        console.warn('Could not load from /api/sync:', e);
       }
     }
 
-    if (!window.googleAuth || !window.googleAuth.isAuthenticated()) {
-      return null;
+    // Tier 2: Google Apps Script Web App URL (Direct)
+    const webAppUrl = this.webAppUrl || (window.envConfig && window.envConfig.config && window.envConfig.config.webAppUrl);
+    if (webAppUrl) {
+      try {
+        const res = await fetch(webAppUrl);
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.state && typeof data.state === 'object') {
+            console.log('Progress loaded from Web App URL (state object)');
+            return data.state;
+          }
+          if (data && data.videoRows && data.videoRows.length > 0) {
+            const parsed = this.parseSheetData(data.videoRows, data.dailyRows, data.stateRows);
+            if (parsed) {
+              console.log('Progress loaded from Web App URL (parsed rows)');
+              return parsed;
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Could not load directly from Web App URL:', e);
+      }
     }
 
-    const spreadsheetId = this.getSpreadsheetId();
-    try {
-      const response = await gapi.client.sheets.spreadsheets.values.batchGet({
-        spreadsheetId: spreadsheetId,
-        ranges: ['Daily_Progress!A2:G', 'Video_Logs!A2:I', 'System_State!A2:B']
-      });
-
-      const valueRanges = response.result.valueRanges;
-      if (!valueRanges || valueRanges.length < 2) return null;
-
-      const videoRows = valueRanges[1].values || [];
-      const dailyRows = valueRanges[0].values || [];
-      return this.parseSheetData(videoRows, dailyRows);
-    } catch (err) {
-      console.warn('Could not restore from Google Sheet:', err);
-      return null;
+    // Tier 3: Direct Google Sheets GViz Query (JSONP - works in ANY browser without CORS or login)
+    if (spreadsheetId) {
+      try {
+        const gvizData = await this.loadViaGviz(spreadsheetId);
+        if (gvizData) {
+          console.log('Progress loaded directly from Google Sheets GViz endpoint');
+          return gvizData;
+        }
+      } catch (e) {
+        console.warn('Direct GViz fetch warning:', e);
+      }
     }
+
+    // Tier 4: Google OAuth 2.0 (GAPI batchGet if authenticated)
+    if (window.googleAuth && window.googleAuth.isAuthenticated()) {
+      try {
+        const response = await gapi.client.sheets.spreadsheets.values.batchGet({
+          spreadsheetId: spreadsheetId,
+          ranges: ['Daily_Progress!A2:G', 'Video_Logs!A2:I', 'System_State!A2:C']
+        });
+
+        const valueRanges = response.result.valueRanges;
+        if (valueRanges && valueRanges.length >= 2) {
+          const videoRows = valueRanges[1].values || [];
+          const dailyRows = valueRanges[0].values || [];
+          const stateRows = valueRanges[2] ? valueRanges[2].values || [] : [];
+          const parsed = this.parseSheetData(videoRows, dailyRows, stateRows);
+          if (parsed) {
+            console.log('Progress loaded via Google OAuth batchGet');
+            return parsed;
+          }
+        }
+      } catch (err) {
+        console.warn('Could not restore from Google Sheets OAuth:', err);
+      }
+    }
+
+    return null;
   }
 
-  parseSheetData(videoRows, dailyRows) {
+  // Load directly from public Google Sheets using JSONP
+  async loadViaGviz(spreadsheetId) {
+    try {
+      const [videoRows, dailyRows, stateRows] = await Promise.all([
+        this.fetchGvizSheetJsonp(spreadsheetId, 'Video_Logs'),
+        this.fetchGvizSheetJsonp(spreadsheetId, 'Daily_Progress'),
+        this.fetchGvizSheetJsonp(spreadsheetId, 'System_State')
+      ]);
+
+      if (videoRows && videoRows.length > 0) {
+        return this.parseSheetData(videoRows, dailyRows, stateRows);
+      }
+    } catch (err) {
+      console.warn('loadViaGviz error:', err);
+    }
+    return null;
+  }
+
+  // Fetch sheet table data via dynamic script tag (JSONP avoids CORS blocks)
+  fetchGvizSheetJsonp(spreadsheetId, sheetName) {
+    return new Promise((resolve) => {
+      const cbName = 'gviz_cb_' + Math.random().toString(36).substring(2, 10);
+      const script = document.createElement('script');
+      let isDone = false;
+
+      const timeout = setTimeout(() => {
+        cleanup();
+        resolve([]);
+      }, 8000);
+
+      function cleanup() {
+        if (isDone) return;
+        isDone = true;
+        clearTimeout(timeout);
+        try {
+          delete window[cbName];
+        } catch (e) {
+          window[cbName] = undefined;
+        }
+        if (script.parentNode) script.parentNode.removeChild(script);
+      }
+
+      window[cbName] = (resp) => {
+        cleanup();
+        if (!resp || !resp.table || !resp.table.rows) {
+          resolve([]);
+          return;
+        }
+        const rows = resp.table.rows.map(r => 
+          r && r.c ? r.c.map(cell => (cell ? (cell.f !== undefined ? cell.f : (cell.v !== null ? cell.v : '')) : '')) : []
+        );
+        resolve(rows);
+      };
+
+      script.onerror = () => {
+        cleanup();
+        resolve([]);
+      };
+
+      script.src = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=responseHandler:${cbName}&sheet=${encodeURIComponent(sheetName)}`;
+      document.head.appendChild(script);
+    });
+  }
+
+  parseSheetData(videoRows, dailyRows, stateRows = []) {
     if (!videoRows || videoRows.length === 0) return null;
 
+    // Filter out potential header row
+    const cleanVideoRows = videoRows.filter(row => {
+      const first = String(row[0] || '').trim();
+      return first && first !== 'Video #' && !isNaN(parseInt(first, 10));
+    });
+
+    if (cleanVideoRows.length === 0) return null;
+
     const restoredVideos = {};
-    videoRows.forEach(row => {
+    cleanVideoRows.forEach(row => {
       const index = parseInt(row[0], 10);
-      const lec = PLAYLIST_DATA.find(l => l.index === index);
+      const youtubeId = String(row[8] || '').trim();
+      const lec = PLAYLIST_DATA.find(l => l.index === index) || (youtubeId ? PLAYLIST_DATA.find(l => l.youtubeId === youtubeId) : null);
       if (lec) {
-        const isSeen = (row[3] || '').includes('SEEN') || (row[3] || '').includes('✅');
-        const percent = parseInt(row[4] || '0', 10);
-        const currentTime = parseInt(row[5] || '0', 10);
+        const statusStr = String(row[3] || '');
+        const isSeen = (!statusStr.includes('UNSEEN') && statusStr.includes('SEEN')) || statusStr.includes('✅');
+        let percent = parseInt(String(row[4] || '0').replace('%', ''), 10);
+        if (isNaN(percent)) percent = 0;
+        let currentTime = parseInt(row[5] || '0', 10);
+        if (isNaN(currentTime)) currentTime = 0;
 
         restoredVideos[lec.id] = {
           id: lec.id,
@@ -249,11 +377,18 @@ class GoogleSheetsManager {
       }
     });
 
+    // Parse Daily Progress
+    const cleanDailyRows = (dailyRows || []).filter(row => {
+      const first = String(row[0] || '').trim();
+      return first && first !== 'Day Batch' && first.startsWith('Day');
+    });
+
     const restoredDays = {};
-    (dailyRows || []).forEach((row, i) => {
-      const dayNum = i + 1;
-      const isComplete = (row[2] || '').includes('COMPLETED') || (row[2] || '').includes('✅');
-      const watchedMatch = (row[4] || '').match(/^(\d+)/);
+    cleanDailyRows.forEach((row, i) => {
+      const dayMatch = String(row[0] || '').match(/\d+/);
+      const dayNum = dayMatch ? parseInt(dayMatch[0], 10) : (i + 1);
+      const isComplete = String(row[2] || '').includes('COMPLETED') || String(row[2] || '').includes('✅');
+      const watchedMatch = String(row[4] || '').match(/^(\d+)/);
       const watchedCount = watchedMatch ? parseInt(watchedMatch[1], 10) : (isComplete ? 4 : 0);
 
       restoredDays[dayNum] = {
@@ -264,9 +399,54 @@ class GoogleSheetsManager {
       };
     });
 
+    // Parse System State (current active day, streak)
+    let currentActiveDay = null;
+    let streakDays = 1;
+    if (Array.isArray(stateRows)) {
+      stateRows.forEach(row => {
+        const metric = String(row[0] || '').toLowerCase();
+        const val = String(row[1] || '');
+        if (metric.includes('current active day')) {
+          const m = val.match(/\d+/);
+          if (m) currentActiveDay = parseInt(m[0], 10);
+        } else if (metric.includes('streak')) {
+          const m = val.match(/\d+/);
+          if (m) streakDays = parseInt(m[0], 10);
+        }
+      });
+    }
+
+    // Determine appropriate active day (advance if currentActiveDay is already completed)
+    if (!currentActiveDay || (restoredDays[currentActiveDay] && restoredDays[currentActiveDay].completed)) {
+      for (let d = 1; d <= TOTAL_DAYS; d++) {
+        if (!restoredDays[d] || !restoredDays[d].completed) {
+          currentActiveDay = d;
+          break;
+        }
+      }
+    }
+    if (!currentActiveDay) currentActiveDay = 1;
+
+    // Determine current video ID (first unseen lecture of currentActiveDay)
+    let currentVideoId = null;
+    const dayLecs = getLecturesForDay(currentActiveDay);
+    const firstUnseenInDay = dayLecs.find(l => !restoredVideos[l.id]?.seen);
+    if (firstUnseenInDay) {
+      currentVideoId = firstUnseenInDay.id;
+    } else {
+      const anyUnseen = PLAYLIST_DATA.find(l => !restoredVideos[l.id]?.seen);
+      currentVideoId = anyUnseen ? anyUnseen.id : (PLAYLIST_DATA[0]?.id || 'vid_1');
+    }
+
     return {
+      version: 1,
+      currentActiveDay,
+      currentVideoId,
       videos: restoredVideos,
-      days: restoredDays
+      days: restoredDays,
+      stats: {
+        streakDays
+      }
     };
   }
 }

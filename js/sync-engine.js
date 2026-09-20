@@ -10,6 +10,8 @@ class BackgroundSyncEngine {
     this.countdownTimer = null;
     this.secondsRemaining = 300;
     this.isSyncing = false;
+    this.isRestoring = false;
+    this.hasInitialRestoreCompleted = false;
     this.lastSyncTime = null;
     this.syncStatus = 'idle'; // 'idle', 'syncing', 'success', 'error', 'offline'
     this.listeners = [];
@@ -25,7 +27,7 @@ class BackgroundSyncEngine {
     if (window.googleAuth) {
       window.googleAuth.subscribe((event) => {
         if (event === 'login_success') {
-          this.triggerInitialCloudSync();
+          this.restoreFromCloud(true);
         }
       });
     }
@@ -33,7 +35,7 @@ class BackgroundSyncEngine {
     // Also auto-sync on Day completed or major milestones
     if (window.lectureTracker) {
       window.lectureTracker.subscribe((event) => {
-        if (event === 'day_completed') {
+        if (event === 'day_completed' && this.hasInitialRestoreCompleted) {
           this.performSync(false); // Quick background sync on milestone
         }
       });
@@ -73,37 +75,82 @@ class BackgroundSyncEngine {
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   }
 
-  // Initial cloud restore or push upon login
-  async triggerInitialCloudSync() {
-    if (!window.googleAuth || !window.googleAuth.isAuthenticated()) return;
-
+  // Restore progress from Google Sheets or Google Drive
+  async restoreFromCloud(force = false) {
+    if (this.isRestoring) return false;
+    this.isRestoring = true;
     this.setSyncStatus('syncing');
+
     try {
-      // 1. Try to load from Google Drive / Sheets first
-      const driveData = await window.googleDrive.loadStateFromDrive();
-      if (driveData) {
-        window.lectureTracker.importState(driveData);
-      } else {
-        const sheetData = await window.googleSheets.loadFromGoogleSheet();
-        if (sheetData) {
-          window.lectureTracker.importState(sheetData);
+      console.log('Attempting cloud restore from Google Sheets / Drive...');
+
+      let cloudData = null;
+
+      // 1. If Google OAuth is authenticated, check Google Drive backup first
+      if (window.googleAuth && window.googleAuth.isAuthenticated() && window.googleDrive) {
+        try {
+          cloudData = await window.googleDrive.loadStateFromDrive();
+        } catch (e) {
+          console.warn('Drive restore attempt failed:', e);
         }
       }
 
-      // 2. Perform write sync to ensure cloud is up to date
-      await this.performSync(false);
-    } catch (e) {
-      console.warn('Initial cloud sync warning:', e);
-      this.performSync(false);
+      // 2. Load from Google Sheets (via Serverless Proxy, Webhook, or direct GViz JSONP)
+      if (!cloudData && window.googleSheets) {
+        cloudData = await window.googleSheets.loadFromGoogleSheet();
+      }
+
+      if (cloudData) {
+        // Safely merge cloud progress with local progress
+        window.lectureTracker.mergeState(cloudData);
+        this.lastSyncTime = new Date();
+        const seenCount = window.lectureTracker.state.stats.totalVideosSeen;
+
+        this.setSyncStatus('success', {
+          timestamp: this.lastSyncTime,
+          formattedTime: this.lastSyncTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          restored: true,
+          seenVideos: seenCount
+        });
+
+        console.log(`Cloud restore completed successfully! Restored ${seenCount} lectures.`);
+        return { success: true, seenVideos: seenCount };
+      } else {
+        console.log('No cloud progress found or sheet was empty.');
+        this.setSyncStatus('idle');
+        return { success: false, reason: 'empty_or_unavailable' };
+      }
+    } catch (err) {
+      console.error('Cloud restore failed:', err);
+      this.setSyncStatus('error', { error: err.message });
+      return { success: false, error: err.message };
+    } finally {
+      this.isRestoring = false;
+      this.hasInitialRestoreCompleted = true;
     }
+  }
+
+  // Initial cloud restore or push upon login
+  async triggerInitialCloudSync() {
+    return this.restoreFromCloud(true);
   }
 
   // Perform the background sync to Google Sheets & Drive
   async performSync(silent = false) {
-    if (this.isSyncing) return;
+    if (this.isSyncing || this.isRestoring) return;
+
+    // Safety guard: Never auto-sync empty state until initial restore has run
+    if (!this.hasInitialRestoreCompleted) {
+      if (silent) {
+        console.log('Skipping silent auto-sync until initial restore completes');
+        return;
+      }
+      // If manual sync was clicked, run restore first
+      await this.restoreFromCloud();
+    }
 
     const hasServerSync = Boolean(window.envConfig && window.envConfig.config && window.envConfig.config.serverSyncAvailable);
-    const hasWebAppUrl = Boolean(window.googleSheets && window.googleSheets.webAppUrl);
+    const hasWebAppUrl = Boolean(window.googleSheets && (window.googleSheets.webAppUrl || (window.envConfig && window.envConfig.config && window.envConfig.config.webAppUrl)));
     const hasOAuth = Boolean(window.googleAuth && window.googleAuth.isAuthenticated());
 
     if (!hasServerSync && !hasWebAppUrl && !hasOAuth) {
@@ -118,11 +165,11 @@ class BackgroundSyncEngine {
     try {
       const currentState = window.lectureTracker.state;
 
-      // 1. Sync to Google Sheets (Via Apps Script Webhook OR OAuth)
+      // 1. Sync to Google Sheets (Via Serverless Backend Proxy, Apps Script Webhook, OR OAuth)
       const sheetResult = await window.googleSheets.syncToGoogleSheet(currentState);
 
       // 2. Sync to Google Drive backup (if OAuth available)
-      if (hasOAuth) {
+      if (hasOAuth && window.googleDrive) {
         await window.googleDrive.saveToDrive(currentState);
       }
 
@@ -135,7 +182,7 @@ class BackgroundSyncEngine {
         formattedTime: this.lastSyncTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       });
 
-      console.log('5-Min Background Sync Completed Successfully!');
+      console.log('Sync to Google Sheets & Drive Completed Successfully!');
     } catch (err) {
       console.error('Background sync failed:', err);
       this.setSyncStatus('error', { error: err.message });

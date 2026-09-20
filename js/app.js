@@ -15,6 +15,7 @@ document.addEventListener('DOMContentLoaded', () => {
     syncStatusText: document.getElementById('sync-status-text'),
     syncTimerBadge: document.getElementById('sync-timer-badge'),
     syncNowBtn: document.getElementById('sync-now-btn'),
+    pullNowBtn: document.getElementById('pull-now-btn'),
     settingsBtn: document.getElementById('settings-btn'),
 
     // Active 4-Lecture Milestone Goal
@@ -56,6 +57,7 @@ document.addEventListener('DOMContentLoaded', () => {
     settingsModal: document.getElementById('settings-modal'),
     closeSettingsBtn: document.getElementById('close-settings-btn'),
     saveSettingsBtn: document.getElementById('save-settings-btn'),
+    pullSheetBtn: document.getElementById('pull-sheet-btn'),
     envStatusBanner: document.getElementById('env-status-banner'),
     inputWebAppUrl: document.getElementById('input-webapp-url'),
     showScriptCodeBtn: document.getElementById('show-script-code-btn'),
@@ -85,15 +87,33 @@ document.addEventListener('DOMContentLoaded', () => {
       await window.envConfig.loadConfig();
     }
 
-    populateDaySelector();
-    renderActiveDayTarget();
-    renderPlaylist();
-    renderStats();
     setupEventListeners();
     setupAuthListeners();
     setupSyncListeners();
     setupTrackerListeners();
     setupPlayerListeners();
+
+    // Show initial check status
+    if (el.syncStatusText) {
+      el.syncStatusText.textContent = 'Checking cloud progress...';
+    }
+
+    // Auto-restore saved progress from Google Sheets on startup
+    if (window.syncEngine) {
+      try {
+        const restoreRes = await window.syncEngine.restoreFromCloud();
+        if (restoreRes && restoreRes.success && restoreRes.seenVideos > 0) {
+          showToast(`Restored previous progress from Google Sheet (${restoreRes.seenVideos} lectures seen)!`, 'celebrate');
+        }
+      } catch (err) {
+        console.warn('Startup cloud restore error:', err);
+      }
+    }
+
+    populateDaySelector();
+    renderActiveDayTarget();
+    renderPlaylist();
+    renderStats();
 
     // Init YouTube Player
     window.youtubeController.init('youtube-player-container');
@@ -102,8 +122,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (window.googleAuth.config.clientId) {
       setTimeout(() => {
         if (!window.googleAuth.isAuthenticated()) {
-          console.log('Prompting Google login...');
-          // Optional prompt if desired
+          console.log('Google Client ID available for login.');
         }
       }, 1000);
     }
@@ -349,7 +368,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Manual Save to Drive & Sheets Button
     el.syncNowBtn.addEventListener('click', async () => {
       const isServerSync = Boolean(window.envConfig && window.envConfig.config && window.envConfig.config.serverSyncAvailable);
-      const isWebApp = Boolean(window.googleSheets && window.googleSheets.webAppUrl);
+      const isWebApp = Boolean(window.googleSheets && (window.googleSheets.webAppUrl || (window.envConfig && window.envConfig.config && window.envConfig.config.webAppUrl)));
       const isOAuth = Boolean(window.googleAuth && window.googleAuth.isAuthenticated());
 
       if (!isServerSync && !isWebApp && !isOAuth) {
@@ -360,6 +379,32 @@ document.addEventListener('DOMContentLoaded', () => {
         await window.syncEngine.performSync(false);
       }
     });
+
+    // Manual Pull / Restore from Google Sheet Button
+    const handleManualPull = async () => {
+      showToast('Pulling latest progress from Google Sheet...', 'info');
+      if (el.syncStatusText) el.syncStatusText.textContent = 'Pulling from Sheet...';
+      const result = await window.syncEngine.restoreFromCloud(true);
+      if (result && result.success) {
+        populateDaySelector();
+        renderActiveDayTarget();
+        renderPlaylist();
+        renderStats();
+        showToast(`Successfully restored progress from Google Sheet (${result.seenVideos} lectures seen)!`, 'celebrate');
+      } else {
+        showToast('No saved progress found in Google Sheet or could not connect', 'warning');
+      }
+    };
+
+    if (el.pullNowBtn) {
+      el.pullNowBtn.addEventListener('click', handleManualPull);
+    }
+    if (el.pullSheetBtn) {
+      el.pullSheetBtn.addEventListener('click', async () => {
+        closeSettingsModal();
+        await handleManualPull();
+      });
+    }
 
     // Google Login / User Profile Click
     el.googleLoginBtn.addEventListener('click', () => {
@@ -467,16 +512,26 @@ document.addEventListener('DOMContentLoaded', () => {
         if (data.status === 'syncing') {
           el.syncStatusText.textContent = 'Syncing...';
           el.syncNowBtn.innerHTML = `<span class="sync-spinner">🔄</span>`;
+          if (el.pullNowBtn) el.pullNowBtn.innerHTML = `<span class="sync-spinner">🔄</span>`;
         } else if (data.status === 'success') {
-          el.syncStatusText.textContent = `Synced at ${data.formattedTime}`;
-          el.syncNowBtn.innerHTML = `🔄`;
-          showToast('Google Sheets & Drive synced!', 'success');
+          if (data.restored) {
+            el.syncStatusText.textContent = `Restored (${data.seenVideos} seen)`;
+          } else {
+            el.syncStatusText.textContent = `Synced at ${data.formattedTime}`;
+          }
+          el.syncNowBtn.innerHTML = `☁️ Save`;
+          if (el.pullNowBtn) el.pullNowBtn.innerHTML = `📥 Pull Sheet`;
+          if (!data.restored) {
+            showToast('Google Sheets & Drive synced!', 'success');
+          }
         } else if (data.status === 'error') {
           el.syncStatusText.textContent = 'Sync Error';
           el.syncNowBtn.innerHTML = `⚠️`;
+          if (el.pullNowBtn) el.pullNowBtn.innerHTML = `📥 Pull Sheet`;
         } else if (data.status === 'offline') {
           el.syncStatusText.textContent = 'Local (Offline)';
-          el.syncNowBtn.innerHTML = `☁️`;
+          el.syncNowBtn.innerHTML = `☁️ Save`;
+          if (el.pullNowBtn) el.pullNowBtn.innerHTML = `📥 Pull Sheet`;
         }
       }
     });
@@ -607,9 +662,38 @@ document.addEventListener('DOMContentLoaded', () => {
   } catch (err) {
     return ContentService.createTextOutput(JSON.stringify({ status: "error", message: err.toString() })).setMimeType(ContentService.MimeType.JSON);
   }
+}
+
+function doGet(e) {
+  try {
+    var ss = SpreadsheetApp.openById("${el.inputSheetId.value || '1SrajvQUpS_fp5DkTEmHIgHbHI7lw9VBm1SP4QKfk5MY'}");
+    
+    // Check Drive backup first
+    var filename = "gate_aptitude_monitor_backup.json";
+    var files = DriveApp.getFilesByName(filename);
+    if (files.hasNext()) {
+      var content = files.next().getBlob().getDataAsString();
+      return ContentService.createTextOutput(content).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // Read directly from sheets
+    var videoSheet = ss.getSheetByName("Video_Logs");
+    var dailySheet = ss.getSheetByName("Daily_Progress");
+    var stateSheet = ss.getSheetByName("System_State");
+
+    var result = {
+      videoRows: videoSheet ? videoSheet.getDataRange().getValues().slice(1) : [],
+      dailyRows: dailySheet ? dailySheet.getDataRange().getValues().slice(1) : [],
+      stateRows: stateSheet ? stateSheet.getDataRange().getValues().slice(1) : []
+    };
+
+    return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({ error: err.toString() })).setMimeType(ContentService.MimeType.JSON);
+  }
 }`;
       navigator.clipboard.writeText(scriptCode).then(() => {
-        showToast('Apps Script code (with Drive save) copied to clipboard!', 'celebrate');
+        showToast('Apps Script code (with doGet & doPost) copied to clipboard!', 'celebrate');
       }).catch(() => {
         prompt('Copy this code into Extensions > Apps Script in your Google Sheet:', scriptCode);
       });

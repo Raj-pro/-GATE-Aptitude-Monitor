@@ -22,6 +22,7 @@ class EnvironmentConfig {
         if (data && typeof data === 'object') {
           if (data.spreadsheetId) this.config.spreadsheetId = data.spreadsheetId;
           if (data.webAppUrl) this.config.webAppUrl = data.webAppUrl;
+          if (data.serverSyncAvailable !== undefined) this.config.serverSyncAvailable = data.serverSyncAvailable;
           if (data.clientId) this.config.clientId = data.clientId;
           if (data.playlistId) this.config.playlistId = data.playlistId;
 
