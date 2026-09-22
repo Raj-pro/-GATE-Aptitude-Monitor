@@ -80,6 +80,24 @@ A cheerful, modern, and motivating web-based lecture monitor designed specifical
   2. **Google Drive Database**:
      - `gate_aptitude_monitor_backup.json`: Complete JSON state backup saved directly to your Drive.
 
+
+---
+
+## 💻 Running Locally
+
+To start the local development server on `http://localhost:5500`:
+
+```bash
+npm start
+# or
+npm run dev
+```
+
+Alternatively, you can test with Vercel Serverless API functions locally:
+```bash
+npm run dev:vercel
+```
+
 ---
 
 ## 🚀 Setting Up Google OAuth (One-time Step)
