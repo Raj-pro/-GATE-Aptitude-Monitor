@@ -3,13 +3,21 @@
  * Automatically fetches /api/config on Vercel or reads local environment defaults.
  */
 
+// Local fallback defaults (used when no Vercel backend /api/config is available)
+const LOCAL_DEFAULTS = {
+  spreadsheetId: '1SrajvQUpS_fp5DkTEmHIgHbHI7lw9VBm1SP4QKfk5MY',
+  webAppUrl: 'https://script.google.com/macros/s/AKfycbxyuhNUFeHBQrbT-YetoOKHPA70WoPmCEDKFVmpYAvvGsrd2YmjqtC-6NWEG8CagHd7_g/exec',
+  clientId: '324005170891-06to9aidcaiggnu98s0069r4r0cj3267.apps.googleusercontent.com',
+  playlistId: 'PLC36xJgs4dxE43Au1FGRQvwHTr7NbgDCS'
+};
+
 class EnvironmentConfig {
   constructor() {
     this.config = {
-      spreadsheetId: '1SrajvQUpS_fp5DkTEmHIgHbHI7lw9VBm1SP4QKfk5MY',
-      webAppUrl: '',
-      clientId: '',
-      playlistId: 'PLC36xJgs4dxE43Au1FGRQvwHTr7NbgDCS'
+      spreadsheetId: LOCAL_DEFAULTS.spreadsheetId,
+      webAppUrl: LOCAL_DEFAULTS.webAppUrl,
+      clientId: LOCAL_DEFAULTS.clientId,
+      playlistId: LOCAL_DEFAULTS.playlistId
     };
     this.isLoaded = false;
   }

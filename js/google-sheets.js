@@ -7,7 +7,9 @@ class GoogleSheetsManager {
   constructor() {
     this.sheetsReady = false;
     this.DEFAULT_SPREADSHEET_ID = '1SrajvQUpS_fp5DkTEmHIgHbHI7lw9VBm1SP4QKfk5MY';
-    this.webAppUrl = localStorage.getItem('gate_google_webapp_url') || '';
+    // Fall back to envConfig default if localStorage has nothing stored
+    this.webAppUrl = localStorage.getItem('gate_google_webapp_url') ||
+      (window.envConfig && window.envConfig.config && window.envConfig.config.webAppUrl) || '';
   }
 
   getSpreadsheetId() {
